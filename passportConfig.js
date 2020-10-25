@@ -3,16 +3,15 @@ const bcrypt = require('bcrypt');
 const localStrategy = require('passport-local').Strategy;
 
 module.exports = function (passport) {
-
     passport.use(
         // find user by email and then compare user password with entered password
-        new localStrategy((email, password, done) => {
-            User.findOne({ email: email }, (err, user) => {
+        new localStrategy((username, password, done) => {
+            User.findOne({ username: username }, (err, user) => {
                 if (err) throw err;
                 if (!user) return done(null, false);
                 bcrypt.compare(password, user.password, (err, res) => {
                     if (err) throw err;
-                    if (result === true) {
+                    if (res === true) {
                         done(null, user)
                     }
                     else {
