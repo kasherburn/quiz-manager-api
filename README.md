@@ -4,4 +4,4 @@
 
 Install all dependencies by running `npm install`
 
-Run `npm start' to start dev server
+Run `npm start` to start dev server
