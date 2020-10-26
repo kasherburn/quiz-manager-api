@@ -1,16 +1,18 @@
+
 const mongoose = require('mongoose');
 const express = require('express');
 const cors = require('cors');
 const passport = require('passport');
-const passportLocal = require('passport-local').Strategy;
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
-const bodyParser = require('body-parser');
-const User = require('./db/user')
+const User = require('./models/user')
 const app = express();
-const Quiz = require('./db/quizQuestions');
-const quizList = require('./db/quizList');
+const Quiz = require('./models/quizQuestions');
+const quizList = require('./models/quizList');
+const JWT = require('jsonwebtoken')
+
+
 
 // db connection
 mongoose.connect("mongodb+srv://root:Grasmere1@qm-cluster.vu1a8.mongodb.net/<dbname>?retryWrites=true&w=majority", {
@@ -21,67 +23,86 @@ mongoose.connect("mongodb+srv://root:Grasmere1@qm-cluster.vu1a8.mongodb.net/<dbn
 })
 
 // middleware
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }))
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }))
+// cors module so requests from front end aren't blocked
 app.use(cors({
     origin: 'http://localhost:4200',
     credentials: true
 }))
+// session package
 app.use(session({
-    secret: "secretCode",
+    secret: "secretkey",
     resave: true,
     saveUninitialized: true
 }))
-app.use(cookieParser('secretCode'))
-app.use(passport.initialize());
+app.use(cookieParser('secretkey'))
+app.use(passport.initialize()); // initialize passport.js
 app.use(passport.session());
-require('./passportConfig')(passport); //import passport config file
+app.use(express.json())
+require('./passportConfig'); //import passport config file
 //end of middleware
 
 //routes
-//login endpoint
-app.post("/auth", (req, res, next) => {
-    passport.authenticate("local", (err, user, info) => {
-        if (err) throw err;
-        if (!user) res.json('user not found!');
-        else {
-            req.logIn(user, err => {
-                if (err) throw err;
-                res.json('successfully authenticated!')
-            })
-        }
 
-    })(req, res, next);
-})
+//login endpoint
+app.post(
+    "/auth",
+    passport.authenticate("local", { session: false }),
+    (req, res) => {
+        if (req.isAuthenticated()) {
+            const username = req.user.username
+            const token = JWT.sign({ //and then generate a token
+                iss: 'kelly', //issuer
+                sub: req.user.id, //subject of the jwt
+                iat: new Date().getTime(), //current time
+                exp: new Date().setDate(new Date().getDate() + 1) //current time plus one day
+            }, 'secretkey');
+            res.status(200).json({ isAuthenticated: true, user: { username }, bearer_token: token });
+        }
+    }
+);
+
+//log out
+app.get(
+    "/logout",
+    passport.authenticate('jwt', { session: false }),
+    (req, res) => {
+        res.json({ user: { username: "" }, bearer_token: '', session: true });
+    }
+);
+
 // create user
 app.post("/register", (req, res) => {
     User.findOne({ username: req.body.username }, async (err, doc) => {
         if (err) throw err;
-        if (doc) res.json('user already exists!')
+        if (doc) res.json({ message: 'user already exists!' })
         if (!doc) {
             const hashedPassword = await bcrypt.hash(req.body.password, 10) //use bcrypt to hash password
             const newUser = new User({
                 username: req.body.username,
                 password: hashedPassword
             });
-            await newUser.save();
-            res.json('user created!')
+            await newUser.save(); //save user
+            res.status(200).json({
+                message: 'user created!'
+            })
         }
     })
 })
 // get user details endpoint
-// app.get("/user", (req, res) => {
-//     res.send(req.user);
-// })
+app.get("/user",
+    (req, res) => {
+        res.send(req.user);
+    })
 
 // create a quiz title
 app.post(
     "/add-quiz-title",
+    passport.authenticate('jwt', { session: false }),
     (req, res) => {
         const quiz_name = req.body.quiz_name;
         const quiz_id = req.body.quiz_id
-
-
         const quizName = new quizList({
             quiz_name,
             quiz_id
@@ -100,6 +121,7 @@ app.post(
 // create a quiz question
 app.post(
     "/add-quiz",
+    passport.authenticate('jwt', { session: false }),
     (req, res) => {
         const question = req.body.question;
         const answer_a = req.body.answer_a;
@@ -128,6 +150,7 @@ app.post(
 //get quiz list
 app.get(
     "/quiz-list",
+    passport.authenticate('jwt', { session: false }),
     (req, res) => {
         quizList.find()
             .then((quizzes) => res.json(quizzes))
@@ -138,11 +161,11 @@ app.get(
             );
     }
 );
-//get quizzes by quiz id
 
-//return one quiz using the quiz_name
+//return a list of quiz questions using the quiz_name
 app.get(
     "/questions/:quiz_id",
+    passport.authenticate('jwt', { session: false }),
     (req, res) => {
         Quiz.find({ quiz_id: req.params.quiz_id })
             .then((quizzes) => res.json(quizzes))
@@ -157,6 +180,7 @@ app.get(
 // update a quiz question
 app.put(
     "/update-question",
+    passport.authenticate('jwt', { session: false }),
     (req, res) => {
         Quiz.findById({ "_id": req.body.id })
             .then((quiz) => {
@@ -180,7 +204,6 @@ app.put(
             );
     }
 );
-
 
 
 //start server
