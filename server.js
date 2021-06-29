@@ -8,10 +8,11 @@ const bcrypt = require('bcrypt');
 const session = require('express-session');
 const User = require('./models/user')
 const app = express();
-const Quiz = require('./models/quizQuestions');
+const Question = require('./models/quizQuestions');
+const Answer = require('./models/quizAnswers');
 const quizList = require('./models/quizList');
 const JWT = require('jsonwebtoken')
-
+const { checkPermissions } = require('./permissions')
 
 
 // db connection
@@ -81,7 +82,8 @@ app.post("/register", (req, res) => {
             const hashedPassword = await bcrypt.hash(req.body.password, 10) //use bcrypt to hash password
             const newUser = new User({
                 username: req.body.username,
-                password: hashedPassword
+                password: hashedPassword,
+                permissions: req.body.permissions
             });
             await newUser.save(); //save user
             res.status(200).json({
@@ -90,16 +92,12 @@ app.post("/register", (req, res) => {
         }
     })
 })
-// get user details endpoint
-app.get("/user",
-    (req, res) => {
-        res.send(req.user);
-    })
+
 
 // create a quiz title
 app.post(
     "/add-quiz-title",
-    passport.authenticate('jwt', { session: false }),
+    passport.authenticate('jwt', { session: false }), checkPermissions('Edit'),
     (req, res) => {
         const quiz_name = req.body.quiz_name;
         const quiz_id = req.body.quiz_id
@@ -118,27 +116,37 @@ app.post(
             );
     }
 );
+
 // create a quiz question
 app.post(
     "/add-quiz",
-    passport.authenticate('jwt', { session: false }),
+    passport.authenticate('jwt', { session: false }), checkPermissions('Edit'),
     (req, res) => {
         const question = req.body.question;
-        const answer_a = req.body.answer_a;
-        const answer_b = req.body.answer_b;
-        const answer_c = req.body.answer_c;
-        const quiz_name = req.body.quiz_name
+        const answer_a = req.body.answer_a ? req.body.answer_a : null;
+        const answer_b = req.body.answer_b ? req.body.answer_b : null;
+        const answer_c = req.body.answer_c ? req.body.answer_c : null;
+        const answer_d = req.body.answer_d ? req.body.answer_d : null;
+        const quiz_id = req.body.quiz_id;
+        const question_id = req.body.question_id;
 
-        const newQuizQuestion = new Quiz({
+        const newQuizQuestion = new Question({
             question,
+            quiz_id,
+            question_id
+        });
+
+        const newQuizAnswer = new Answer({
+            quiz_id,
+            question_id,
             answer_a,
             answer_b,
             answer_c,
-            quiz_name
-        });
+            answer_d
+        })
 
-        newQuizQuestion
-            .save()
+        newQuizQuestion.save()
+        newQuizAnswer.save()
             .then(() => res.json("Quiz Added!"))
             .catch((err) =>
                 res.status(400).json({
@@ -147,6 +155,7 @@ app.post(
             );
     }
 );
+
 //get quiz list
 app.get(
     "/quiz-list",
@@ -162,13 +171,30 @@ app.get(
     }
 );
 
-//return a list of quiz questions using the quiz_name
+//return a list of quiz questions using the quiz id
 app.get(
-    "/questions/:quiz_id",
+    "/questions/:quiz_name",
     passport.authenticate('jwt', { session: false }),
     (req, res) => {
-        Quiz.find({ quiz_id: req.params.quiz_id })
-            .then((quizzes) => res.json(quizzes))
+        Question.find({ quiz_id: req.params.quiz_name })
+            .then((quizzes) =>
+                res.json(quizzes))
+            .catch((err) =>
+                res.status(400).json({
+                    message: { messageBody: "ERROR:" + err, messageError: true },
+                })
+            );
+    }
+);
+
+//return a list of quiz answers using the quiz id
+app.get(
+    "/answers/:quiz_name",
+    passport.authenticate('jwt', { session: false }), checkPermissions('View'),
+    (req, res) => {
+        Answer.find({ quiz_id: req.params.quiz_name })
+            .then((answers) =>
+                res.json(answers))
             .catch((err) =>
                 res.status(400).json({
                     message: { messageBody: "ERROR:" + err, messageError: true },
@@ -180,17 +206,13 @@ app.get(
 // update a quiz question
 app.put(
     "/update-question",
-    passport.authenticate('jwt', { session: false }),
+    passport.authenticate('jwt', { session: false }), checkPermissions('Edit'),
     (req, res) => {
-        Quiz.findById({ "_id": req.body.id })
-            .then((quiz) => {
-                quiz.question = req.body.question;
-                quiz.answer_a = req.body.answer_a;
-                quiz.answer_b = req.body.answer_b;
-                quiz.answer_c = req.body.answer_c;
-                quiz
-                    .save()
-                    .then(() => res.json("Quiz updated!"))
+        Question.findById({ "_id": req.body.id })
+            .then((question) => {
+                question.question = req.body.question;
+                question.save()
+                    .then(() => res.json("Question updated!"))
                     .catch((err) =>
                         res.status(400).json({
                             message: { messageBody: "ERROR:" + err, messageError: true },
@@ -204,6 +226,77 @@ app.put(
             );
     }
 );
+// update a quiz answer
+app.put(
+    "/update-answer",
+    passport.authenticate('jwt', { session: false }), checkPermissions('Edit'),
+    (req, res) => {
+        Answer.findById({ "_id": req.body.id })
+            .then((answer) => {
+                answer.answer_a = req.body.answer_a;
+                answer.answer_b = req.body.answer_b;
+                answer.answer_c = req.body.answer_c;
+                answer.answer_d = req.body.answer_d;
+                answer.save()
+                    .then(() => res.json("Answer updated!"))
+                    .catch((err) =>
+                        res.status(400).json({
+                            message: { messageBody: "ERROR:" + err, messageError: true },
+                        })
+                    );
+            })
+    }
+);
+// remove quiz name
+app.delete(
+    "/delete-quiz-name/:name",
+    passport.authenticate("jwt", { session: false }), checkPermissions('Edit'),
+    (req, res) => {
+        quizList.findOneAndDelete({ quiz_name: req.params.name })
+            .then((
+            ) => res.json("Quiz name deleted!"))
+            .catch((err) =>
+                res.status(400).json({
+                    message: { messageBody: "ERROR:" + err, messageError: true },
+                })
+            );
+
+    }
+);
+// remove question
+app.delete(
+    "/delete-question/:id",
+    passport.authenticate("jwt", { session: false }), checkPermissions('Edit'),
+    (req, res) => {
+        Question.findOneAndDelete({ question_id: req.params.id })
+            .then((
+            ) => res.json("Question deleted!"))
+            .catch((err) =>
+                res.status(400).json({
+                    message: { messageBody: "ERROR:" + err, messageError: true },
+                })
+            );
+
+    }
+);
+
+// remove answers to a question
+app.delete(
+    "/delete-answers/:id",
+    passport.authenticate("jwt", { session: false }), checkPermissions('Edit'),
+    (req, res) => {
+        Answer.findOneAndDelete({ question_id: req.params.id })
+            .then(() => res.json("Answers deleted!"))
+            .catch((err) =>
+                res.status(400).json({
+                    message: { messageBody: "ERROR:" + err, messageError: true },
+                })
+            );
+    }
+);
+
+
+
 
 
 //start server
